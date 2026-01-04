@@ -188,6 +188,14 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
                 (extensionId: string) => this.getAvailableKernels(extensionId),
             ),
         );
+
+        this._context.subscriptions.push(
+            vscode.commands.registerCommand(
+                "mssql.connectionSharing.getCompletions",
+                (connectionUri: string, text: string, line: number, column: number) =>
+                    this.getCompletions(connectionUri, text, line, column),
+            ),
+        );
     }
 
     private async getStoredExtensionPermissions(): Promise<ExtensionPermissionsMap> {
@@ -747,5 +755,97 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
         );
 
         return kernels;
+    }
+
+    /**
+     * Get SQL completions (intellisense) for a given connection and SQL text.
+     * Uses the SQL Tools Service's LSP completion endpoint.
+     */
+    public async getCompletions(
+        connectionUri: string,
+        text: string,
+        line: number,
+        column: number,
+    ): Promise<mssql.ICompletionItem[]> {
+        this._logger.info(
+            `Getting completions for connection URI: ${connectionUri}, line: ${line}, column: ${column}`,
+        );
+
+        if (!connectionUri) {
+            this._logger.error("Invalid connection URI provided for completions.");
+            throw new ConnectionSharingError(
+                ConnectionSharingErrorCode.INVALID_CONNECTION_URI,
+                LocalizedConstants.ConnectionSharing.invalidConnectionUri,
+            );
+        }
+
+        if (!this.isConnected(connectionUri)) {
+            this._logger.error(`Connection not active for URI: ${connectionUri}`);
+            throw new ConnectionSharingError(
+                ConnectionSharingErrorCode.NO_ACTIVE_CONNECTION,
+                LocalizedConstants.ConnectionSharing.connectionNotActive,
+            );
+        }
+
+        try {
+            // Send completion request to SQL Tools Service
+            // The STS uses a custom completion request format
+            const result = await this._client.sendRequest(
+                new RequestType<
+                    {
+                        ownerUri: string;
+                        textDocument: { text: string };
+                        position: { line: number; character: number };
+                    },
+                    { items: any[] },
+                    void,
+                    void
+                >("textDocument/completion"),
+                {
+                    ownerUri: connectionUri,
+                    textDocument: { text: text },
+                    position: { line: line, character: column },
+                },
+            );
+
+            this._logger.info(
+                `Received ${result?.items?.length ?? 0} completion items for connection URI: ${connectionUri}`,
+            );
+
+            if (!result || !result.items) {
+                return [];
+            }
+
+            // Map LSP completion items to our interface
+            const completions: mssql.ICompletionItem[] = result.items.map((item: any) => ({
+                label: item.label || "",
+                kind: this.mapCompletionItemKind(item.kind),
+                detail: item.detail,
+                documentation:
+                    typeof item.documentation === "string"
+                        ? item.documentation
+                        : item.documentation?.value,
+                insertText: item.insertText || item.label,
+                filterText: item.filterText,
+                sortText: item.sortText,
+            }));
+
+            return completions;
+        } catch (error) {
+            this._logger.error(`Failed to get completions: ${error}`);
+            return [];
+        }
+    }
+
+    /**
+     * Map LSP CompletionItemKind to a number.
+     * LSP CompletionItemKind values (1-25) map to VS Code's CompletionItemKind (0-24).
+     */
+    private mapCompletionItemKind(kind: number | undefined): number {
+        // LSP uses 1-based, VS Code uses 0-based
+        if (kind === undefined || kind < 1 || kind > 25) {
+            return 0; // Text
+        }
+        return kind - 1;
     }
 }

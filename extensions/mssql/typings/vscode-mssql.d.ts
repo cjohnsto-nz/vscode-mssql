@@ -2618,6 +2618,85 @@ declare module "vscode-mssql" {
          * @returns An array of kernel info objects representing available connections.
          */
         getAvailableKernels(extensionId: string): Promise<IConnectionKernelInfo[]>;
+        /**
+         * Get SQL completions (intellisense) for a given connection and SQL text.
+         * @param connectionUri The URI of the active connection.
+         * @param text The full SQL text in the editor.
+         * @param line The 0-indexed line number of the cursor position.
+         * @param column The 0-indexed column number of the cursor position.
+         * @returns An array of completion items.
+         */
+        getCompletions(
+            connectionUri: string,
+            text: string,
+            line: number,
+            column: number,
+        ): Promise<ICompletionItem[]>;
+    }
+
+    /**
+     * A completion item returned by the SQL intellisense service.
+     */
+    export interface ICompletionItem {
+        /**
+         * The label of this completion item (displayed in the UI).
+         */
+        label: string;
+        /**
+         * The kind of this completion item as a number (maps to VS Code's CompletionItemKind).
+         */
+        kind: number;
+        /**
+         * A human-readable string with additional information about this item.
+         */
+        detail?: string;
+        /**
+         * A human-readable string that represents a doc-comment.
+         */
+        documentation?: string;
+        /**
+         * A string that should be inserted when selecting this completion.
+         */
+        insertText?: string;
+        /**
+         * The text to filter completions by.
+         */
+        filterText?: string;
+        /**
+         * A string that should be used when comparing this item with other items.
+         */
+        sortText?: string;
+    }
+
+    /**
+     * Completion item kinds matching VS Code's CompletionItemKind.
+     */
+    export enum CompletionItemKind {
+        Text = 0,
+        Method = 1,
+        Function = 2,
+        Constructor = 3,
+        Field = 4,
+        Variable = 5,
+        Class = 6,
+        Interface = 7,
+        Module = 8,
+        Property = 9,
+        Unit = 10,
+        Value = 11,
+        Enum = 12,
+        Keyword = 13,
+        Snippet = 14,
+        Color = 15,
+        File = 16,
+        Reference = 17,
+        Folder = 18,
+        EnumMember = 19,
+        Constant = 20,
+        Struct = 21,
+        Event = 22,
+        Operator = 23,
+        TypeParameter = 24,
     }
 
     /**
