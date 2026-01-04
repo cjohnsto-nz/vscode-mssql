@@ -637,6 +637,17 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
             );
         }
 
+        // Look up password from credential store if not already set
+        if (!targetConnection.password && targetConnection.authenticationType === 'SqlLogin') {
+            const password = await this._connectionManager.connectionStore.lookupPassword(
+                targetConnection,
+                false, // isConnectionString
+            );
+            if (password) {
+                targetConnection.password = password;
+            }
+        }
+
         // Use ConnectionManager's getConnectionString method
         const connectionDetails = this._connectionManager.createConnectionDetails(targetConnection);
         const connectionString = await this._connectionManager.getConnectionString(
