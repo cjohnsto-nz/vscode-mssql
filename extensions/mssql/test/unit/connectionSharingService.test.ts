@@ -1018,4 +1018,48 @@ suite("ConnectionSharingService Tests", () => {
             expect(secretStorage.store).to.have.been.called;
         });
     });
+
+    suite("getAvailableKernels", () => {
+        test("should return available kernels for approved extension", async () => {
+            secretStorage.get.resolves(JSON.stringify({ [testExtensionId]: "approved" }));
+
+            const command = registeredCommands.get("mssql.connectionSharing.getAvailableKernels");
+            const kernels = await command!(testExtensionId);
+
+            expect(kernels).to.be.an("array");
+            expect(kernels).to.have.lengthOf(1);
+            expect(kernels[0]).to.deep.include({
+                id: testConnectionId,
+                name: "TestProfile",
+                server: "testServer",
+                database: "testDatabase",
+                authenticationType: "SqlLogin",
+            });
+        });
+
+        test("should throw error for unapproved extension", async () => {
+            secretStorage.get.resolves(JSON.stringify({}));
+            showInformationMessageStub.resolves(LocalizedConstants.ConnectionSharing.Deny);
+
+            const command = registeredCommands.get("mssql.connectionSharing.getAvailableKernels");
+
+            try {
+                await command!(testExtensionId);
+                expect.fail("Should have thrown an error");
+            } catch (error) {
+                expect((error as Error).message).to.include("denied");
+            }
+        });
+
+        test("should return empty array when no connections exist", async () => {
+            secretStorage.get.resolves(JSON.stringify({ [testExtensionId]: "approved" }));
+            (connectionManager.connectionStore.connectionConfig.getConnections as sinon.SinonStub).resolves([]);
+
+            const command = registeredCommands.get("mssql.connectionSharing.getAvailableKernels");
+            const kernels = await command!(testExtensionId);
+
+            expect(kernels).to.be.an("array");
+            expect(kernels).to.have.lengthOf(0);
+        });
+    });
 });

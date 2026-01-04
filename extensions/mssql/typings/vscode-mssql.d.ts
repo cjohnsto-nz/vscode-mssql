@@ -2610,5 +2610,44 @@ declare module "vscode-mssql" {
          * @returns The access token if the connection uses Azure MFA and a token is available, or undefined otherwise.
          */
         getAccessToken(extensionId: string, connectionId: string): Promise<string | undefined>;
+        /**
+         * Get all available connections as notebook kernels.
+         * This allows external extensions to discover saved connections and use them as execution targets.
+         * No credentials are exposed - only metadata about the connections.
+         * @param extensionId The ID of the extension.
+         * @returns An array of kernel info objects representing available connections.
+         */
+        getAvailableKernels(extensionId: string): Promise<IConnectionKernelInfo[]>;
+    }
+
+    /**
+     * Information about a connection that can be used as a notebook kernel.
+     * This interface exposes only metadata - no credentials or secrets.
+     */
+    export interface IConnectionKernelInfo {
+        /**
+         * Unique identifier for the connection.
+         */
+        id: string;
+        /**
+         * Display name for the connection (profile name).
+         */
+        name: string;
+        /**
+         * Server name or address.
+         */
+        server: string;
+        /**
+         * Database name.
+         */
+        database: string;
+        /**
+         * Authentication type (e.g., 'SqlLogin', 'AzureMFA', 'Integrated').
+         */
+        authenticationType: string;
+        /**
+         * User name (for display purposes, not for authentication).
+         */
+        userName?: string;
     }
 }
