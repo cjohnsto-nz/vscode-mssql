@@ -155,7 +155,7 @@ export class MsalCachePluginProvider {
                     `MsalCachePlugin: Failed to acquire lock on cache file. Retrying in ${retryWait} ms.`,
                 );
 
-                await new Promise((resolve) => setTimeout(() => resolve, retryWait));
+                await new Promise((resolve) => setTimeout(resolve, retryWait));
             }
         }
     }

@@ -173,6 +173,14 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
                     this.getConnectionString(extensionId, connectionId),
             ),
         );
+
+        this._context.subscriptions.push(
+            vscode.commands.registerCommand(
+                "mssql.connectionSharing.getAccessToken",
+                (extensionId: string, connectionId: string) =>
+                    this.getAccessToken(extensionId, connectionId),
+            ),
+        );
     }
 
     private async getStoredExtensionPermissions(): Promise<ExtensionPermissionsMap> {
@@ -418,6 +426,7 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
         if (databaseName) {
             targetConnection.database = databaseName; // Set the database if provided
         }
+
         const connectionResult = await this._connectionManager.connect(
             connectionUri,
             targetConnection,
@@ -640,5 +649,72 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
             `Retrieved connection string for connection ID "${connectionId}" for extension "${extensionId}".`,
         );
         return connectionString;
+    }
+
+    public async getAccessToken(
+        extensionId: string,
+        connectionId: string,
+    ): Promise<string | undefined> {
+        await this.validateExtensionPermission(extensionId);
+
+        const connections =
+            await this._connectionManager.connectionStore.connectionConfig.getConnections();
+        const targetConnection = connections.find((conn) => conn.id === connectionId);
+
+        if (!targetConnection) {
+            this._logger.error(
+                `Connection with ID "${connectionId}" not found for extension "${extensionId}".`,
+            );
+            throw new ConnectionSharingError(
+                ConnectionSharingErrorCode.CONNECTION_NOT_FOUND,
+                LocalizedConstants.ConnectionSharing.connectionNotFoundError(connectionId),
+                extensionId,
+                connectionId,
+            );
+        }
+
+        // Only return token for Azure MFA connections
+        if (targetConnection.authenticationType !== 'AzureMFA') {
+            this._logger.info(
+                `Connection "${connectionId}" does not use Azure MFA authentication.`,
+            );
+            return undefined;
+        }
+
+        try {
+            // Get the account from the account store
+            const account = await this._connectionManager.accountStore.getAccount(targetConnection.accountId);
+            if (!account) {
+                this._logger.error(`Account not found for connection "${connectionId}".`);
+                return undefined;
+            }
+
+            // Get the SQL resource settings for the account's cloud provider
+            const { getCloudProviderSettings } = await import("../azure/providerSettings");
+            const providerSettings = getCloudProviderSettings(account.key.providerId);
+            const sqlResource = providerSettings.settings.sqlResource;
+
+            // Get the access token for SQL
+            const tenantId = targetConnection.tenantId || account.properties.owningTenant?.id;
+            const token = await this._connectionManager.azureController.getAccountSecurityToken(
+                account,
+                tenantId,
+                sqlResource,
+            );
+
+            if (token) {
+                this._logger.info(
+                    `Retrieved access token for connection ID "${connectionId}" for extension "${extensionId}".`,
+                );
+                return token.token;
+            }
+
+            return undefined;
+        } catch (error) {
+            this._logger.error(
+                `Failed to get access token for connection "${connectionId}": ${error}`,
+            );
+            return undefined;
+        }
     }
 }
