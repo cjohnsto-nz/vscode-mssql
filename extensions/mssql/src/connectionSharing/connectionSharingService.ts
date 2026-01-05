@@ -10,12 +10,15 @@ import * as LocalizedConstants from "../constants/locConstants";
 import { IConnectionProfile } from "../models/interfaces";
 import { generateGuid } from "../models/utils";
 import SqlToolsServiceClient from "../languageservice/serviceclient";
-import { RequestType } from "vscode-languageclient";
+import { RequestType, NotificationType } from "vscode-languageclient";
 import VscodeWrapper from "../controllers/vscodeWrapper";
 import { Logger } from "../models/logger";
 import * as Constants from "../constants/constants";
 import { ScriptingService } from "../scripting/scriptingService";
 import { ScriptOperation } from "../models/contracts/scripting/scriptingRequest";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 const CONNECTION_SHARING_PERMISSIONS_KEY = "mssql.connectionSharing.extensionPermissions";
 
@@ -757,9 +760,13 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
         return kernels;
     }
 
+    // Map of connectionUri to temp file info for completions
+    private _completionTempFiles: Map<string, { path: string; version: number; lastText: string; isOpen: boolean; isConnected: boolean }> = new Map();
+
     /**
      * Get SQL completions (intellisense) for a given connection and SQL text.
      * Uses the SQL Tools Service's LSP completion endpoint.
+     * Optimized to reuse temp files and use didChange instead of didOpen for updates.
      */
     public async getCompletions(
         connectionUri: string,
@@ -767,10 +774,6 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
         line: number,
         column: number,
     ): Promise<mssql.ICompletionItem[]> {
-        this._logger.info(
-            `Getting completions for connection URI: ${connectionUri}, line: ${line}, column: ${column}`,
-        );
-
         if (!connectionUri) {
             this._logger.error("Invalid connection URI provided for completions.");
             throw new ConnectionSharingError(
@@ -788,36 +791,120 @@ export class ConnectionSharingService implements mssql.IConnectionSharingService
         }
 
         try {
+            // Get or create temp file info for this connection
+            let fileInfo = this._completionTempFiles.get(connectionUri);
+            if (!fileInfo) {
+                const tempFilePath = path.join(os.tmpdir(), `mssql-completion-${generateGuid()}.sql`);
+                fileInfo = { path: tempFilePath, version: 0, lastText: "", isOpen: false, isConnected: false };
+                this._completionTempFiles.set(connectionUri, fileInfo);
+                this._logger.info(`Created temp file for completions: ${tempFilePath}`);
+            }
+
+            // Connect the temp file to the database if not already connected
+            // This is required for database-specific intellisense (tables, schemas, etc.)
+            if (!fileInfo.isConnected) {
+                const connectionInfo = this._connectionManager.getConnectionInfoFromUri(connectionUri);
+                if (connectionInfo) {
+                    this._logger.info(`Connecting temp file ${fileInfo.path} to database for intellisense`);
+                    
+                    // Use the connection/connect request to bind the temp file to the connection
+                    const connectResult = await this._client.sendRequest(
+                        new RequestType<any, boolean, void, void>("connection/connect"),
+                        {
+                            ownerUri: fileInfo.path,
+                            connection: {
+                                serverName: connectionInfo.server,
+                                databaseName: connectionInfo.database,
+                                authenticationType: connectionInfo.authenticationType,
+                                userName: connectionInfo.user,
+                                password: connectionInfo.password,
+                                // Copy other connection options
+                                connectTimeout: 30,
+                                applicationName: "mssql-polyglot-notebooks-completions",
+                            },
+                        },
+                    );
+                    
+                    if (connectResult) {
+                        fileInfo.isConnected = true;
+                        this._logger.info(`Temp file connected to database successfully`);
+                        
+                        // Wait a bit for intellisense to initialize
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    } else {
+                        this._logger.warn(`Failed to connect temp file to database`);
+                    }
+                }
+            }
+
+            // Check if content has changed
+            const contentChanged = fileInfo.lastText !== text;
+            
+            if (contentChanged) {
+                fileInfo.version++;
+                fileInfo.lastText = text;
+                
+                // Write text to temp file (needed for STS to read)
+                await fs.promises.writeFile(fileInfo.path, text, "utf8");
+                
+                if (!fileInfo.isOpen) {
+                    // First time - send didOpen
+                    await this._client.sendNotification(
+                        new NotificationType<{ textDocument: { uri: string; languageId: string; version: number; text: string } }, void>(
+                            "textDocument/didOpen"
+                        ),
+                        {
+                            textDocument: {
+                                uri: fileInfo.path,
+                                languageId: "sql",
+                                version: fileInfo.version,
+                                text: text,
+                            },
+                        },
+                    );
+                    fileInfo.isOpen = true;
+                } else {
+                    // Subsequent updates - send didChange (much faster)
+                    await this._client.sendNotification(
+                        new NotificationType<{ textDocument: { uri: string; version: number }; contentChanges: { text: string }[] }, void>(
+                            "textDocument/didChange"
+                        ),
+                        {
+                            textDocument: {
+                                uri: fileInfo.path,
+                                version: fileInfo.version,
+                            },
+                            contentChanges: [{ text: text }],
+                        },
+                    );
+                }
+            }
+
             // Send completion request to SQL Tools Service
-            // The STS uses a custom completion request format
             const result = await this._client.sendRequest(
                 new RequestType<
                     {
-                        ownerUri: string;
-                        textDocument: { text: string };
+                        textDocument: { uri: string };
                         position: { line: number; character: number };
+                        context: { triggerKind: number };
                     },
-                    { items: any[] },
+                    any[],
                     void,
                     void
                 >("textDocument/completion"),
                 {
-                    ownerUri: connectionUri,
-                    textDocument: { text: text },
+                    textDocument: { uri: fileInfo.path },
                     position: { line: line, character: column },
+                    context: { triggerKind: 1 }, // Invoked
                 },
             );
 
-            this._logger.info(
-                `Received ${result?.items?.length ?? 0} completion items for connection URI: ${connectionUri}`,
-            );
-
-            if (!result || !result.items) {
+            if (!result || result.length === 0) {
                 return [];
             }
 
             // Map LSP completion items to our interface
-            const completions: mssql.ICompletionItem[] = result.items.map((item: any) => ({
+            const completions: mssql.ICompletionItem[] = result.map((item: any) => ({
                 label: item.label || "",
                 kind: this.mapCompletionItemKind(item.kind),
                 detail: item.detail,
