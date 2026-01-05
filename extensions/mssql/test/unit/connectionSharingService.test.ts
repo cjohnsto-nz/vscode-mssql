@@ -165,7 +165,6 @@ suite("ConnectionSharingService Tests", () => {
                 "mssql.connectionSharing.scriptOperation",
                 "mssql.connectionSharing.clearAllConnectionSharingPermissions",
                 "mssql.connectionSharing.getConnectionString",
-                "mssql.connectionSharing.getAccessToken",
             ];
 
             expectedCommands.forEach((command) => {
@@ -917,54 +916,6 @@ suite("ConnectionSharingService Tests", () => {
                 expect(error).to.be.instanceOf(ConnectionSharingError);
                 expect((error as ConnectionSharingError).code).to.equal(
                     ConnectionSharingErrorCode.CONNECTION_NOT_FOUND,
-                );
-            }
-        });
-    });
-
-    suite("getAccessToken", () => {
-        test("should return undefined for non-AzureMFA connection", async () => {
-            secretStorage.get.resolves(JSON.stringify({ [testExtensionId]: "approved" }));
-
-            // mockConnectionProfile has authenticationType: "SqlLogin"
-            const command = registeredCommands.get("mssql.connectionSharing.getAccessToken");
-            const result = await command!(testExtensionId, testConnectionId);
-
-            expect(result).to.be.undefined;
-        });
-
-        test("should throw error when connection not found", async () => {
-            secretStorage.get.resolves(JSON.stringify({ [testExtensionId]: "approved" }));
-
-            connectionManager.connectionStore.connectionConfig.getConnections = sandbox
-                .stub()
-                .resolves([]);
-
-            const command = registeredCommands.get("mssql.connectionSharing.getAccessToken");
-
-            try {
-                await command!(testExtensionId, "non-existent-id");
-                expect.fail("Should have thrown error");
-            } catch (error) {
-                expect(error).to.be.instanceOf(ConnectionSharingError);
-                expect((error as ConnectionSharingError).code).to.equal(
-                    ConnectionSharingErrorCode.CONNECTION_NOT_FOUND,
-                );
-            }
-        });
-
-        test("should require permission before returning token", async () => {
-            secretStorage.get.resolves(JSON.stringify({ [testExtensionId]: "denied" }));
-
-            const command = registeredCommands.get("mssql.connectionSharing.getAccessToken");
-
-            try {
-                await command!(testExtensionId, testConnectionId);
-                expect.fail("Should have thrown error");
-            } catch (error) {
-                expect(error).to.be.instanceOf(ConnectionSharingError);
-                expect((error as ConnectionSharingError).code).to.equal(
-                    ConnectionSharingErrorCode.PERMISSION_DENIED,
                 );
             }
         });

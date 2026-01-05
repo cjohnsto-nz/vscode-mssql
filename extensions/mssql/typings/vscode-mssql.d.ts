@@ -2603,14 +2603,6 @@ declare module "vscode-mssql" {
          */
         getConnectionString(extensionId: string, connectionId: string): Promise<string | undefined>;
         /**
-         * Get the access token for a specific connection ID.
-         * Only works for connections using Azure MFA authentication.
-         * @param extensionId The ID of the extension.
-         * @param connectionId The ID of the connection.
-         * @returns The access token if the connection uses Azure MFA and a token is available, or undefined otherwise.
-         */
-        getAccessToken(extensionId: string, connectionId: string): Promise<string | undefined>;
-        /**
          * Get all available connections as notebook kernels.
          * This allows external extensions to discover saved connections and use them as execution targets.
          * No credentials are exposed - only metadata about the connections.

@@ -191,12 +191,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<IExten
                     connectionId,
                 );
             },
-            getAccessToken: (extensionId: string, connectionId: string): Promise<string | undefined> => {
-                return controller.connectionSharingService.getAccessToken(
-                    extensionId,
-                    connectionId,
-                );
-            },
         } as vscodeMssql.IConnectionSharingService,
     };
 }
