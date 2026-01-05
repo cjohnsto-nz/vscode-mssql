@@ -73,6 +73,9 @@ suite("ConnectionSharingService Tests", () => {
         sandbox = sinon.createSandbox();
         registeredCommands = new Map<string, Function>();
 
+        // Reset mock connection profile (may have been mutated by previous tests)
+        mockConnectionProfile.database = testDatabase;
+
         // Create stub instances
         client = sandbox.createStubInstance(SqlToolsServiceClient);
         connectionManager = sandbox.createStubInstance(ConnectionManager);
@@ -981,9 +984,9 @@ suite("ConnectionSharingService Tests", () => {
             expect(kernels).to.have.lengthOf(1);
             expect(kernels[0]).to.deep.include({
                 id: testConnectionId,
-                name: "TestProfile",
-                server: "testServer",
-                database: "testDatabase",
+                name: "Test Profile",
+                server: "test-server",
+                database: testDatabase,
                 authenticationType: "SqlLogin",
             });
         });
@@ -998,7 +1001,10 @@ suite("ConnectionSharingService Tests", () => {
                 await command!(testExtensionId);
                 expect.fail("Should have thrown an error");
             } catch (error) {
-                expect((error as Error).message).to.include("denied");
+                expect(error).to.be.instanceOf(ConnectionSharingError);
+                expect((error as ConnectionSharingError).code).to.equal(
+                    ConnectionSharingErrorCode.PERMISSION_REQUIRED,
+                );
             }
         });
 
